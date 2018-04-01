@@ -14,7 +14,7 @@ import Control.Distributed.Process.Closure
 
 import Worker
 
-import Control.Monad (forM)
+import Control.Monad (forM, forM_)
 import Data.Char (ord)
 import qualified Data.Map as Map
 import Data.Map (Map)
@@ -62,17 +62,27 @@ processMessage mem = do
 foreman :: [ProcessId] -> Process ()
 foreman [] = say "não tem trabaiadô"
 foreman workers = do
-  pm <- expect
-  case pm of
-    Get k sendP -> do
-      case k of
-        "" -> say "empty key"
-        c:cs -> send (getWorker workers c) pm
-    Put k v ->
-      case k of
-        "" -> say "empty key"
-        c:cs -> send (getWorker workers c) pm
-  foreman workers
+  forM_ workers monitor
+  go workers
+  where
+    go :: [ProcessId] -> Process ()
+    go workers = do
+      receiveWait
+        [ match $ \pm -> do
+            case pm of
+              Get k sendP -> do
+                case k of
+                  "" -> say "empty key"
+                  c:cs -> send (getWorker workers c) pm
+              Put k v ->
+                case k of
+                  "" -> say "empty key"
+                  c:cs -> send (getWorker workers c) pm
+            foreman workers
+        , match $ \(ProcessMonitorNotification _ref deadpid reason) -> do
+            say $ "pid " ++ show deadpid ++ " died. reason: " ++ show reason
+            foreman (filter (/= deadpid) workers)
+        ]
 
 remotable ['foreman, 'processMessage]
 
